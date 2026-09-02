@@ -1,0 +1,56 @@
+name: Gerar APK Oferta Express
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Baixar projeto
+        uses: actions/checkout@v4
+
+      - name: Configurar Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Localizar projeto Android
+        id: android
+        shell: bash
+        run: |
+          GRADLEW=$(find . -type f -name gradlew | head -1)
+
+          if [ -z "$GRADLEW" ]; then
+            echo "ERRO: gradlew não encontrado."
+            find . -maxdepth 4 -type f | sort | head -200
+            exit 1
+          fi
+
+          ANDROID_DIR=$(dirname "$GRADLEW")
+
+          echo "Projeto Android encontrado em: $ANDROID_DIR"
+          echo "dir=$ANDROID_DIR" >> "$GITHUB_OUTPUT"
+
+      - name: Permissão Gradle
+        working-directory: ${{ steps.android.outputs.dir }}
+        run: chmod +x gradlew
+
+      - name: Compilar APK
+        working-directory: ${{ steps.android.outputs.dir }}
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Localizar APK
+        run: |
+          find . -type f -name "*.apk" -print
+
+      - name: Salvar APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Oferta-Express-APK
+          path: "**/build/outputs/apk/debug/*.apk"
+          if-no-files-found: error
