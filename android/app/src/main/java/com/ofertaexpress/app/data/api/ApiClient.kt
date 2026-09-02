@@ -16,7 +16,7 @@ object ApiClient {
         encodeDefaults = true
     }
 
-    private val client: OkHttpClient by lazy {
+    private val httpClient: OkHttpClient by lazy {
         val logging = HttpLoggingInterceptor().apply {
             level = HttpLoggingInterceptor.Level.BODY
         }
@@ -27,7 +27,7 @@ object ApiClient {
             .writeTimeout(20, TimeUnit.SECONDS)
             .build()
     }
-fun getOkHttpClient(): OkHttpClient = client
+fun getOkHttpClient(): OkHttpClient = httpClient
 
     fun createService(baseUrl: String): OfertaExpressApiService {
         val cleanUrl = if (baseUrl.endsWith("/")) baseUrl else "$baseUrl/"
@@ -35,7 +35,7 @@ fun getOkHttpClient(): OkHttpClient = client
 
         return Retrofit.Builder()
             .baseUrl(cleanUrl)
-            .client(okHttpClient)
+            .client(httpClient)
             .addConverterFactory(json.asConverterFactory(contentType))
             .build()
             .create(OfertaExpressApiService::class.java)
