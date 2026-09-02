@@ -7,7 +7,7 @@ data class ProductData(
     val productId: String? = null,
     val shopId: String? = null,
     val title: String,
-    val currentPrice: Double,
+    val currentPrice: Double? = null,
     val originalPrice: Double? = null,
     val discountPercentage: Int? = null,
     val rating: Double? = null,
