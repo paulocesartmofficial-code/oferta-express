@@ -317,7 +317,6 @@ if (originalPrice === undefined) {
             title = this.cleanHtmlEntities(titleTagMatch[1].replace(/\s*\|\s*Shopee\s*Brasil.*$/i, '').trim());
           }
         }
-      }
     } catch (e) {
       // Network fetch error - graceful fallback without crashing
       console.warn('Could not fetch public page metadata:', e);
