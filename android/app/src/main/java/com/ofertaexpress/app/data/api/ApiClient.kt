@@ -28,7 +28,6 @@ object ApiClient {
             .build()
     }
 
-    fun getOkHttpClient(): OkHttpClient = okHttpClient
 
     fun createService(baseUrl: String): OfertaExpressApiService {
         val cleanUrl = if (baseUrl.endsWith("/")) baseUrl else "$baseUrl/"
