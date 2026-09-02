@@ -16,7 +16,7 @@ object ApiClient {
         encodeDefaults = true
     }
 
-    private val okHttpClient: OkHttpClient by lazy {
+    private val client: OkHttpClient by lazy {
         val logging = HttpLoggingInterceptor().apply {
             level = HttpLoggingInterceptor.Level.BODY
         }
@@ -27,7 +27,7 @@ object ApiClient {
             .writeTimeout(20, TimeUnit.SECONDS)
             .build()
     }
-
+fun getOkHttpClient(): OkHttpClient = client
 
     fun createService(baseUrl: String): OfertaExpressApiService {
         val cleanUrl = if (baseUrl.endsWith("/")) baseUrl else "$baseUrl/"
