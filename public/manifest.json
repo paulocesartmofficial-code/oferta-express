@@ -1,0 +1,16 @@
+{
+  "short_name": "Oferta Express",
+  "name": "Oferta Express – Gerador de Ofertas Shopee",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "192x192 512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#ffffff",
+  "theme_color": "#ee4d2d",
+  "display": "standalone",
+  "orientation": "portrait"
+}

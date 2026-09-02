@@ -1,0 +1,6 @@
+{
+  "name": "Oferta Express - Gerador de Ofertas Shopee",
+  "description": "Transforme links de produtos da Shopee em ofertas prontas para grupos e comunidades do WhatsApp com dados reais e redação inteligente.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

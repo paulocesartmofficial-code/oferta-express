@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="brand_dark_bg">#020617</color>
+    <color name="brand_card_bg">#0F172A</color>
+    <color name="brand_card_border">#1E293B</color>
+    <color name="brand_orange">#EA580C</color>
+    <color name="brand_orange_light">#FB923C</color>
+    <color name="brand_green">#10B981</color>
+    <color name="text_white">#F8FAFC</color>
+    <color name="text_muted">#94A3B8</color>
+</resources>

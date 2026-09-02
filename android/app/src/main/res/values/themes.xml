@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Strictly Dark Mode Theme (Never switches to light mode) -->
+    <style name="Theme.OfertaExpress" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/brand_dark_bg</item>
+        <item name="android:statusBarColor">@color/brand_dark_bg</item>
+        <item name="android:navigationBarColor">@color/brand_dark_bg</item>
+        <item name="android:forceDarkAllowed">false</item>
+    </style>
+</resources>

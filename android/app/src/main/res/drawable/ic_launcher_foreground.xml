@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Flame / Express Icon -->
+    <path
+        android:fillColor="#EA580C"
+        android:pathData="M54,26 C54,26 62,38 62,48 C62,56 57,62 50,65 C52,58 48,52 44,48 C44,60 38,66 38,74 C38,83 45,90 54,90 C66,90 76,80 76,68 C76,48 54,26 54,26 Z"/>
+    <path
+        android:fillColor="#FDBA74"
+        android:pathData="M54,58 C58,62 60,68 60,72 C60,78 56,82 52,82 C48,82 46,78 48,74 C50,70 54,66 54,58 Z"/>
+</vector>

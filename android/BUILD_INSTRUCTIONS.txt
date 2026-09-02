@@ -1,0 +1,27 @@
+=====================================================
+         OFERTA EXPRESS - INSTRUÇÕES DE BUILD
+=====================================================
+
+Projeto Android nativo 100% configurado para Gradle.
+
+REQUISITOS DO AMBIENTE:
+- JDK 17 (Java Development Kit)
+- Android SDK (compileSdk 34, targetSdk 34, minSdk 24)
+- Variável ANDROID_HOME apontando para o SDK ou Android Studio instalado
+
+COMO COMPILAR O APK DE DEBUG:
+
+1. No terminal do seu computador, servidor CI ou Termux, execute:
+   ./gradlew assembleDebug
+
+   (No Windows cmd/PowerShell: gradlew.bat assembleDebug)
+
+2. O APK final ficará exatamente em:
+   app/build/outputs/apk/debug/app-debug.apk
+
+3. Para instalar diretamente no aparelho Android via adb:
+   adb install -r app/build/outputs/apk/debug/app-debug.apk
+
+NOTAS DE SEGURANÇA:
+- O aplicativo não contém nenhuma chave de API ou segredo hardcoded no APK.
+- As chamadas de IA e processamento são realizadas através do backend seguro, cuja URL pode ser definida na tela "Ajustes" do app.
