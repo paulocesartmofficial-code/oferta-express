@@ -60,7 +60,7 @@ export class ShopeeProductProvider implements ProductProvider {
 
     const title = htmlData.title || this.extractTitleFromSlug(parsed.pathname) || 'Produto Shopee';
     const images = htmlData.images.length > 0 ? htmlData.images : [];
-    const currentPrice = htmlData.currentPrice;
+    const currentPrice = htmlData.currentPrice ?? 0;
     const originalPrice = htmlData.originalPrice;
 
     // Mathematical discount calculation only if real data exists
@@ -194,13 +194,120 @@ export class ShopeeProductProvider implements ProductProvider {
           }
         }
 
-        // 4. Meta Price (og:price:amount, product:price:amount)
-        if (currentPrice === undefined) {
-          const priceMatch = html.match(/<meta\s+property=["'](?:product|og):price:amount["']\s+content=["']([^"']+)["']/i);
-          if (priceMatch && priceMatch[1]) {
-            const num = parseFloat(priceMatch[1]);
-            if (!isNaN(num) && num > 0) currentPrice = num;
-          }
+        // 4. PRICE FALLBACKS
+// Tenta Meta Tags, JSON embutido e preço visível em R$
+
+if (currentPrice === undefined) {
+
+    // 4.1 Meta tags padrão
+    const metaPriceMatch =
+        html.match(
+            /<meta\s+(?:property|name)=["'](?:product:price:amount|og:price:amount)["']\s+content=["']([^"']+)["']/i
+        ) ||
+        html.match(
+            /<meta\s+content=["']([^"']+)["']\s+(?:property|name)=["'](?:product:price:amount|og:price:amount)["']/i
+        );
+
+    if (metaPriceMatch && metaPriceMatch[1]) {
+        const raw = metaPriceMatch[1]
+            .replace(/[^\d.,]/g, '')
+            .replace(/\.(?=\d{3}(?:\D|$))/g, '')
+            .replace(',', '.');
+
+        const value = parseFloat(raw);
+
+        if (!isNaN(value) && value > 0) {
+            currentPrice = value;
+        }
+    }
+}
+
+
+// 4.2 JSON / scripts internos da página
+if (currentPrice === undefined) {
+
+    const jsonPricePatterns = [
+        /"currentPrice"\s*:\s*"?([\d.,]+)"?/i,
+        /"salePrice"\s*:\s*"?([\d.,]+)"?/i,
+        /"price"\s*:\s*"([\d]+[.,]\d{2})"/i,
+        /"price"\s*:\s*([\d]+\.\d{2})/i
+    ];
+
+    for (const pattern of jsonPricePatterns) {
+
+        const match = html.match(pattern);
+
+        if (match && match[1]) {
+
+            const raw = match[1]
+                .replace(/\.(?=\d{3}(?:\D|$))/g, '')
+                .replace(',', '.');
+
+            const value = parseFloat(raw);
+
+            if (!isNaN(value) && value > 0) {
+                currentPrice = value;
+                break;
+            }
+        }
+    }
+}
+
+
+// 4.3 Preço visível brasileiro: R$ 59,90
+if (currentPrice === undefined) {
+
+    const brPriceMatch = html.match(
+        /R\$\s*(\d{1,6}(?:\.\d{3})*(?:,\d{2}))/i
+    );
+
+    if (brPriceMatch && brPriceMatch[1]) {
+
+        const raw = brPriceMatch[1]
+            .replace(/\./g, '')
+            .replace(',', '.');
+
+        const value = parseFloat(raw);
+
+        if (!isNaN(value) && value > 0) {
+            currentPrice = value;
+        }
+    }
+}
+
+
+// 4.4 Procura preço antigo/original
+if (originalPrice === undefined) {
+
+    const originalPatterns = [
+        /"originalPrice"\s*:\s*"?([\d.,]+)"?/i,
+        /"priceBeforeDiscount"\s*:\s*"?([\d.,]+)"?/i,
+        /"original_price"\s*:\s*"?([\d.,]+)"?/i
+    ];
+
+    for (const pattern of originalPatterns) {
+
+        const match = html.match(pattern);
+
+        if (match && match[1]) {
+
+            const raw = match[1]
+                .replace(/\.(?=\d{3}(?:\D|$))/g, '')
+                .replace(',', '.');
+
+            const value = parseFloat(raw);
+
+            if (
+                !isNaN(value) &&
+                value > 0 &&
+                value !== currentPrice
+            ) {
+                originalPrice = value;
+                break;
+            }
+        }
+    }
+}
         }
 
         // 5. Fallback HTML title
