@@ -154,6 +154,10 @@ export class ShopeeProductProvider implements ProductProvider {
           if (match[1] && !images.includes(match[1])) {
             images.push(match[1]);
           }
+          console.log('SHOPEE STATUS:', res.status);
+console.log('SHOPEE URL FINAL:', res.url);
+console.log('HTML SIZE:', html.length);
+console.log('HTML START:', html.substring(0, 1000));
         }
 
         // 3. JSON-LD Structured Data
