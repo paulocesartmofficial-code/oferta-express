@@ -101,244 +101,540 @@ export class ShopeeProductProvider implements ProductProvider {
     }
     return undefined;
   }
+private async extractFromPublicPage(targetUrl: string): Promise<{
+  title?: string;
+  images: string[];
+  currentPrice?: number;
+  originalPrice?: number;
+  sellerName?: string;
+  rating?: number;
+  soldCount?: number;
+  availability?: boolean;
+  productId?: string;
+}> {
+  const images: string[] = [];
 
-  private async extractFromPublicPage(targetUrl: string): Promise<{
-    title?: string;
-    images: string[];
-    currentPrice?: number;
-    originalPrice?: number;
-    sellerName?: string;
-    rating?: number;
-    soldCount?: number;
-    availability?: boolean;
-    productId?: string;
-  }> {
-    const images: string[] = [];
-    let title: string | undefined;
-    let currentPrice: number | undefined;
-    let originalPrice: number | undefined;
-    let sellerName: string | undefined;
-    let rating: number | undefined;
-    let soldCount: number | undefined;
-    let availability: boolean | undefined;
-    let productId: string | undefined;
+  let title: string | undefined;
+  let currentPrice: number | undefined;
+  let originalPrice: number | undefined;
+  let sellerName: string | undefined;
+  let rating: number | undefined;
+  let soldCount: number | undefined;
+  let availability: boolean | undefined;
+  let productId: string | undefined;
 
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 7000);
+  const parsePrice = (value: unknown): number | undefined => {
+    if (value === null || value === undefined) {
+      return undefined;
+    }
 
-      const res = await fetch(targetUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-          'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-          'Cache-Control': 'no-cache',
-        },
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
+    let raw = String(value)
+      .trim()
+      .replace(/[^\d.,]/g, '');
 
-      if (res.ok) {
-        const html = await res.text();
+    if (!raw) {
+      return undefined;
+    }
 
-        // 1. OpenGraph Title
-        const ogTitleMatch = html.match(/<meta\s+property=["']og:title["']\s+content=["']([^"']+)["']/i) ||
-                             html.match(/<meta\s+content=["']([^"']+)["']\s+property=["']og:title["']/i);
-        if (ogTitleMatch && ogTitleMatch[1]) {
-          title = this.cleanHtmlEntities(ogTitleMatch[1].replace(/\s*\|\s*Shopee\s*Brasil.*$/i, '').trim());
-        }
+    // Formato brasileiro: 1.299,90
+    if (raw.includes(',')) {
+      raw = raw
+        .replace(/\./g, '')
+        .replace(',', '.');
+    } else {
+      // Evita tratar separador de milhar como decimal
+      const parts = raw.split('.');
 
-        // 2. OpenGraph Image
-        const ogImageMatches = html.matchAll(/<meta\s+(?:property|name)=["']og:image(?::secure_url)?["']\s+content=["']([^"']+)["']/gi);
-        for (const match of ogImageMatches) {
-          if (match[1] && !images.includes(match[1])) {
-            images.push(match[1]);
-          }
-          console.log('SHOPEE STATUS:', res.status);
-console.log('SHOPEE URL FINAL:', res.url);
-console.log('HTML SIZE:', html.length);
-console.log('HTML START:', html.substring(0, 1000));
-        }
+      if (
+        parts.length > 2 ||
+        (parts.length === 2 && parts[1].length === 3)
+      ) {
+        raw = raw.replace(/\./g, '');
+      }
+    }
 
-        // 3. JSON-LD Structured Data
-        const jsonLdMatches = html.matchAll(/<script\s+type=["']application\/ld\+json["']>([^<]+)<\/script>/gi);
-        for (const jMatch of jsonLdMatches) {
-          try {
-            const data = JSON.parse(jMatch[1]);
-            if (data['@type'] === 'Product' || data.name) {
-              if (data.name && !title) {
-                title = this.cleanHtmlEntities(data.name);
-              }
-              if (data.image) {
-                const imgArray = Array.isArray(data.image) ? data.image : [data.image];
-                imgArray.forEach((im: string) => {
-                  if (typeof im === 'string' && !images.includes(im)) images.push(im);
-                });
-              }
-              if (data.offers) {
-                const offer = Array.isArray(data.offers) ? data.offers[0] : data.offers;
-                if (offer && offer.price) {
-                  const num = parseFloat(offer.price);
-                  if (!isNaN(num) && num > 0) currentPrice = num;
-                }
-              }
-              if (data.aggregateRating && data.aggregateRating.ratingValue) {
-                const r = parseFloat(data.aggregateRating.ratingValue);
-                if (!isNaN(r)) rating = r;
-              }
-              if (data.brand && data.brand.name) {
-                sellerName = data.brand.name;
-              }
-              if (data.sku) {
-                productId = String(data.sku);
-              }
-            }
-          } catch {
-            // ignore invalid json-ld block
-          }
-        }
+    const parsed = Number.parseFloat(raw);
 
-        // 4. PRICE FALLBACKS
-// Tenta Meta Tags, JSON embutido e preço visível em R$
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      return undefined;
+    }
 
-if (currentPrice === undefined) {
+    return parsed;
+  };
 
-    // 4.1 Meta tags padrão
-    const metaPriceMatch =
+  try {
+    const controller = new AbortController();
+
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+    }, 10000);
+
+    const res = await fetch(targetUrl, {
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+
+        Accept:
+          'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+
+        'Accept-Language':
+          'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+
+        'Cache-Control': 'no-cache',
+      },
+
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    console.log('SHOPEE STATUS:', res.status);
+    console.log('SHOPEE URL FINAL:', res.url);
+
+    if (res.ok) {
+      const html = await res.text();
+
+      console.log('HTML SIZE:', html.length);
+      console.log('HTML START:', html.substring(0, 1000));
+
+      // =====================================================
+      // 1. TÍTULO - OPEN GRAPH
+      // =====================================================
+
+      const ogTitleMatch =
         html.match(
-            /<meta\s+(?:property|name)=["'](?:product:price:amount|og:price:amount)["']\s+content=["']([^"']+)["']/i
+          /<meta\s+property=["']og:title["']\s+content=["']([^"']+)["']/i
         ) ||
         html.match(
-            /<meta\s+content=["']([^"']+)["']\s+(?:property|name)=["'](?:product:price:amount|og:price:amount)["']/i
+          /<meta\s+content=["']([^"']+)["']\s+property=["']og:title["']/i
         );
 
-    if (metaPriceMatch && metaPriceMatch[1]) {
-        const raw = metaPriceMatch[1]
-            .replace(/[^\d.,]/g, '')
-            .replace(/\.(?=\d{3}(?:\D|$))/g, '')
-            .replace(',', '.');
+      if (ogTitleMatch && ogTitleMatch[1]) {
+        title = this.cleanHtmlEntities(
+          ogTitleMatch[1]
+            .replace(/\s*\|\s*Shopee\s*Brasil.*$/i, '')
+            .trim()
+        );
+      }
 
-        const value = parseFloat(raw);
+      // =====================================================
+      // 2. IMAGENS OPEN GRAPH
+      // =====================================================
 
-        if (!isNaN(value) && value > 0) {
-            currentPrice = value;
+      const ogImageRegex =
+        /<meta\s+(?:property|name)=["']og:image(?::secure_url)?["']\s+content=["']([^"']+)["']/gi;
+
+      let imageMatch: RegExpExecArray | null;
+
+      while ((imageMatch = ogImageRegex.exec(html)) !== null) {
+        const imageUrl = imageMatch[1];
+
+        if (
+          imageUrl &&
+          !images.includes(imageUrl)
+        ) {
+          images.push(imageUrl);
         }
-    }
-}
+      }
 
+      // Também suporta atributos invertidos
+      const ogImageReverseRegex =
+        /<meta\s+content=["']([^"']+)["']\s+(?:property|name)=["']og:image(?::secure_url)?["']/gi;
 
-// 4.2 JSON / scripts internos da página
-if (currentPrice === undefined) {
+      while ((imageMatch = ogImageReverseRegex.exec(html)) !== null) {
+        const imageUrl = imageMatch[1];
 
-    const jsonPricePatterns = [
-        /"currentPrice"\s*:\s*"?([\d.,]+)"?/i,
-        /"salePrice"\s*:\s*"?([\d.,]+)"?/i,
-        /"price"\s*:\s*"([\d]+[.,]\d{2})"/i,
-        /"price"\s*:\s*([\d]+\.\d{2})/i
-    ];
+        if (
+          imageUrl &&
+          !images.includes(imageUrl)
+        ) {
+          images.push(imageUrl);
+        }
+      }
 
-    for (const pattern of jsonPricePatterns) {
+      // =====================================================
+      // 3. JSON-LD
+      // =====================================================
 
-        const match = html.match(pattern);
+      const jsonLdRegex =
+        /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
 
-        if (match && match[1]) {
+      let jsonMatch: RegExpExecArray | null;
 
-            const raw = match[1]
-                .replace(/\.(?=\d{3}(?:\D|$))/g, '')
-                .replace(',', '.');
+      while ((jsonMatch = jsonLdRegex.exec(html)) !== null) {
+        try {
+          const data = JSON.parse(jsonMatch[1]);
 
-            const value = parseFloat(raw);
+          const candidates = Array.isArray(data)
+            ? data
+            : [data];
 
-            if (!isNaN(value) && value > 0) {
-                currentPrice = value;
-                break;
+          for (const item of candidates) {
+            if (!item) {
+              continue;
             }
-        }
-    }
-}
 
+            const product =
+              item['@type'] === 'Product'
+                ? item
+                : item['@graph']?.find?.(
+                    (x: any) => x?.['@type'] === 'Product'
+                  );
 
-// 4.3 Preço visível brasileiro: R$ 59,90
-if (currentPrice === undefined) {
+            if (!product) {
+              continue;
+            }
 
-    const brPriceMatch = html.match(
-        /R\$\s*(\d{1,6}(?:\.\d{3})*(?:,\d{2}))/i
-    );
+            if (!title && product.name) {
+              title = this.cleanHtmlEntities(
+                String(product.name)
+              );
+            }
 
-    if (brPriceMatch && brPriceMatch[1]) {
+            if (product.image) {
+              const productImages = Array.isArray(product.image)
+                ? product.image
+                : [product.image];
 
-        const raw = brPriceMatch[1]
-            .replace(/\./g, '')
-            .replace(',', '.');
+              for (const img of productImages) {
+                const imgUrl =
+                  typeof img === 'string'
+                    ? img
+                    : img?.url;
 
-        const value = parseFloat(raw);
+                if (
+                  imgUrl &&
+                  typeof imgUrl === 'string' &&
+                  !images.includes(imgUrl)
+                ) {
+                  images.push(imgUrl);
+                }
+              }
+            }
 
-        if (!isNaN(value) && value > 0) {
-            currentPrice = value;
-        }
-    }
-}
+            if (product.offers) {
+              const offers = Array.isArray(product.offers)
+                ? product.offers
+                : [product.offers];
 
+              for (const offer of offers) {
+                if (!offer) {
+                  continue;
+                }
 
-// 4.4 Procura preço antigo/original
-if (originalPrice === undefined) {
+                if (currentPrice === undefined) {
+                  currentPrice =
+                    parsePrice(offer.price) ??
+                    parsePrice(offer.lowPrice);
+                }
 
-    const originalPatterns = [
-        /"originalPrice"\s*:\s*"?([\d.,]+)"?/i,
-        /"priceBeforeDiscount"\s*:\s*"?([\d.,]+)"?/i,
-        /"original_price"\s*:\s*"?([\d.,]+)"?/i
-    ];
+                if (originalPrice === undefined) {
+                  originalPrice =
+                    parsePrice(offer.highPrice);
+                }
 
-    for (const pattern of originalPatterns) {
+                if (
+                  availability === undefined &&
+                  offer.availability
+                ) {
+                  const availabilityText =
+                    String(offer.availability).toLowerCase();
 
-        const match = html.match(pattern);
-
-        if (match && match[1]) {
-
-            const raw = match[1]
-                .replace(/\.(?=\d{3}(?:\D|$))/g, '')
-                .replace(',', '.');
-
-            const value = parseFloat(raw);
+                  availability =
+                    !availabilityText.includes('outofstock') &&
+                    !availabilityText.includes('soldout');
+                }
+              }
+            }
 
             if (
-                !isNaN(value) &&
-                value > 0 &&
-                value !== currentPrice
+              rating === undefined &&
+              product.aggregateRating?.ratingValue
             ) {
-                originalPrice = value;
-                break;
-            }
-        }
-    }
-}
-        }
+              const parsedRating = Number.parseFloat(
+                String(product.aggregateRating.ratingValue)
+              );
 
-        // 5. Fallback HTML title
-        if (!title) {
-          const titleTagMatch = html.match(/<title>([^<]+)<\/title>/i);
-          if (titleTagMatch && titleTagMatch[1]) {
-            title = this.cleanHtmlEntities(titleTagMatch[1].replace(/\s*\|\s*Shopee\s*Brasil.*$/i, '').trim());
+              if (Number.isFinite(parsedRating)) {
+                rating = parsedRating;
+              }
+            }
+
+            if (
+              product.aggregateRating?.reviewCount &&
+              soldCount === undefined
+            ) {
+              const parsedReviews = Number.parseInt(
+                String(product.aggregateRating.reviewCount),
+                10
+              );
+
+              if (Number.isFinite(parsedReviews)) {
+                soldCount = parsedReviews;
+              }
+            }
+
+            if (
+              !sellerName &&
+              product.brand
+            ) {
+              sellerName =
+                typeof product.brand === 'string'
+                  ? product.brand
+                  : product.brand?.name;
+            }
+
+            if (
+              !productId &&
+              product.sku
+            ) {
+              productId = String(product.sku);
+            }
+          }
+        } catch {
+          // ignora JSON-LD inválido
+        }
+      }
+
+      // =====================================================
+      // 4. META TAG DE PREÇO
+      // =====================================================
+
+      if (currentPrice === undefined) {
+        const metaPriceMatch =
+          html.match(
+            /<meta\s+(?:property|name)=["'](?:product:price:amount|og:price:amount)["']\s+content=["']([^"']+)["']/i
+          ) ||
+          html.match(
+            /<meta\s+content=["']([^"']+)["']\s+(?:property|name)=["'](?:product:price:amount|og:price:amount)["']/i
+          );
+
+        if (
+          metaPriceMatch &&
+          metaPriceMatch[1]
+        ) {
+          currentPrice =
+            parsePrice(metaPriceMatch[1]);
+        }
+      }
+
+      // =====================================================
+      // 5. JSON INTERNO DA PÁGINA
+      // =====================================================
+
+      if (currentPrice === undefined) {
+        const pricePatterns = [
+          /"currentPrice"\s*:\s*"?([\d.,]+)"?/i,
+          /"salePrice"\s*:\s*"?([\d.,]+)"?/i,
+          /"sale_price"\s*:\s*"?([\d.,]+)"?/i,
+          /"price"\s*:\s*"([\d]+[.,]\d{2})"/i,
+          /"price"\s*:\s*([\d]+\.\d{2})/i,
+        ];
+
+        for (const pattern of pricePatterns) {
+          const match = html.match(pattern);
+
+          if (
+            match &&
+            match[1]
+          ) {
+            const value = parsePrice(match[1]);
+
+            if (value !== undefined) {
+              currentPrice = value;
+              break;
+            }
           }
         }
-    } catch (e) {
-      // Network fetch error - graceful fallback without crashing
-      console.warn('Could not fetch public page metadata:', e);
-    }
+      }
 
-    return {
-      title,
-      images,
-      currentPrice,
-      originalPrice,
-      sellerName,
-      rating,
-      soldCount,
-      availability,
-      productId,
-    };
+      // =====================================================
+      // 6. PREÇO VISÍVEL R$ 99,90
+      // =====================================================
+
+      if (currentPrice === undefined) {
+        const visiblePriceMatch =
+          html.match(
+            /R\$\s*(\d{1,6}(?:\.\d{3})*(?:,\d{2}))/i
+          );
+
+        if (
+          visiblePriceMatch &&
+          visiblePriceMatch[1]
+        ) {
+          currentPrice =
+            parsePrice(visiblePriceMatch[1]);
+        }
+      }
+
+      // =====================================================
+      // 7. PREÇO ORIGINAL
+      // =====================================================
+
+      if (originalPrice === undefined) {
+        const originalPatterns = [
+          /"originalPrice"\s*:\s*"?([\d.,]+)"?/i,
+          /"original_price"\s*:\s*"?([\d.,]+)"?/i,
+          /"priceBeforeDiscount"\s*:\s*"?([\d.,]+)"?/i,
+          /"price_before_discount"\s*:\s*"?([\d.,]+)"?/i,
+        ];
+
+        for (const pattern of originalPatterns) {
+          const match = html.match(pattern);
+
+          if (
+            match &&
+            match[1]
+          ) {
+            const value = parsePrice(match[1]);
+
+            if (
+              value !== undefined &&
+              value !== currentPrice
+            ) {
+              originalPrice = value;
+              break;
+            }
+          }
+        }
+      }
+
+      // =====================================================
+      // 8. SELLER
+      // =====================================================
+
+      if (!sellerName) {
+        const sellerPatterns = [
+          /"shopName"\s*:\s*"([^"]+)"/i,
+          /"shop_name"\s*:\s*"([^"]+)"/i,
+          /"sellerName"\s*:\s*"([^"]+)"/i,
+        ];
+
+        for (const pattern of sellerPatterns) {
+          const match = html.match(pattern);
+
+          if (
+            match &&
+            match[1]
+          ) {
+            sellerName =
+              this.cleanHtmlEntities(match[1]);
+
+            break;
+          }
+        }
+      }
+
+      // =====================================================
+      // 9. RATING
+      // =====================================================
+
+      if (rating === undefined) {
+        const ratingMatch =
+          html.match(
+            /"(?:rating|ratingStar|rating_star)"\s*:\s*([\d.]+)/i
+          );
+
+        if (
+          ratingMatch &&
+          ratingMatch[1]
+        ) {
+          const parsedRating =
+            Number.parseFloat(ratingMatch[1]);
+
+          if (
+            Number.isFinite(parsedRating) &&
+            parsedRating >= 0 &&
+            parsedRating <= 5
+          ) {
+            rating = parsedRating;
+          }
+        }
+      }
+
+      // =====================================================
+      // 10. VENDIDOS
+      // =====================================================
+
+      if (soldCount === undefined) {
+        const soldMatch =
+          html.match(
+            /"(?:sold|soldCount|sold_count|historical_sold)"\s*:\s*(\d+)/i
+          );
+
+        if (
+          soldMatch &&
+          soldMatch[1]
+        ) {
+          const parsedSold =
+            Number.parseInt(soldMatch[1], 10);
+
+          if (Number.isFinite(parsedSold)) {
+            soldCount = parsedSold;
+          }
+        }
+      }
+
+      // =====================================================
+      // 11. ID DO PRODUTO
+      // =====================================================
+
+      if (!productId) {
+        const productIdMatch =
+          html.match(
+            /"(?:itemid|item_id|productId|product_id)"\s*:\s*"?(\d+)"?/i
+          );
+
+        if (
+          productIdMatch &&
+          productIdMatch[1]
+        ) {
+          productId =
+            productIdMatch[1];
+        }
+      }
+
+      // =====================================================
+      // 12. FALLBACK DO TITLE
+      // =====================================================
+
+      if (!title) {
+        const titleTagMatch =
+          html.match(
+            /<title>([^<]+)<\/title>/i
+          );
+
+        if (
+          titleTagMatch &&
+          titleTagMatch[1]
+        ) {
+          title = this.cleanHtmlEntities(
+            titleTagMatch[1]
+              .replace(/\s*\|\s*Shopee\s*Brasil.*$/i, '')
+              .trim()
+          );
+        }
+      }
+    }
+  } catch (e) {
+    console.warn(
+      'Could not fetch public page metadata:',
+      e
+    );
   }
 
+  return {
+    title,
+    images,
+    currentPrice,
+    originalPrice,
+    sellerName,
+    rating,
+    soldCount,
+    availability,
+    productId,
+  };
+}
   private cleanHtmlEntities(str: string): string {
     return str
       .replace(/&amp;/g, '&')
