@@ -204,7 +204,29 @@ app.post('/api/offer/pipeline', async (req: Request, res: Response) => {
       success: true,
       product,
       affiliate,
-      offer,
+      offer: {
+  title: offer.headline || product.title || 'Oferta Shopee',
+  formattedText:
+    offer.fullMessage ||
+    [offer.headline, offer.body, offer.cta].filter(Boolean).join('\n\n'),
+
+  keyBenefits: [],
+
+  currentPrice: product.currentPrice ?? 0,
+  originalPrice: product.originalPrice ?? null,
+  discountPercentage: product.discountPercentage ?? null,
+
+  couponCode: null,
+
+  affiliateLink: affiliate.affiliateUrl,
+
+  selectedImage:
+    product.images && product.images.length > 0
+      ? (product.images[offer.selectedImageIndex] || product.images[0])
+      : null,
+
+  callToAction: offer.cta || null
+},
       historyItem,
     });
   } catch (error: unknown) {
