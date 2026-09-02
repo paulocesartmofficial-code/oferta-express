@@ -227,7 +227,12 @@ app.post('/api/offer/pipeline', async (req: Request, res: Response) => {
 
   callToAction: offer.cta || null
 },
-      historyItem,
+      historyItem: historyItem
+  ? {
+      ...historyItem,
+      currentPrice: historyItem.currentPrice ?? product.currentPrice ?? 0
+    }
+  : null,
     });
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : 'Erro ao executar pipeline de oferta.';
