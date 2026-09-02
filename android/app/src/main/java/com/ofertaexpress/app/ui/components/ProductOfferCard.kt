@@ -102,7 +102,7 @@ fun ProductOfferCard(
                     )
 
                     product.originalPrice?.let { orig ->
-                        if (orig > product.currentPrice) {
+                        if (product.currentPrice != null && orig > product.currentPrice) {
                             Text(
                                 text = "R$ ${String.format("%.2f", orig)}",
                                 fontSize = 12.sp,
