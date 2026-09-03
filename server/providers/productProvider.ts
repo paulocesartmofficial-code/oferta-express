@@ -216,47 +216,96 @@ export class ShopeeProductProvider implements ProductProvider {
   private async resolveProductUrl(
     initialUrl: string
   ): Promise<string> {
-    let currentUrl = initialUrl;
+    const initialCheck = validateSafeShopeeUrl(initialUrl);
 
+    if (!initialCheck.isSafe || !initialCheck.cleanUrl) {
+      throw new Error(
+        initialCheck.error || 'URL inicial não autorizada.'
+      );
+    }
+
+    const originalSafeUrl = initialCheck.cleanUrl;
+    let currentUrl = originalSafeUrl;
+
+    /*
+     * Primeiro tenta o resolvedor central do urlGuard.
+     */
     try {
-      currentUrl = await followSafeRedirects(initialUrl);
+      currentUrl = await followSafeRedirects(originalSafeUrl);
     } catch (error) {
       console.warn(
         'followSafeRedirects failed, trying GET resolver:',
         error
       );
+
+      currentUrl = originalSafeUrl;
     }
 
-    const firstCheck =
-      validateSafeShopeeUrl(currentUrl);
+    const afterFollowCheck = validateSafeShopeeUrl(currentUrl);
 
-    if (
-      !firstCheck.isSafe ||
-      !firstCheck.cleanUrl
-    ) {
+    if (!afterFollowCheck.isSafe || !afterFollowCheck.cleanUrl) {
       throw new Error(
-        firstCheck.error ||
-          'URL resolvida não autorizada.'
+        afterFollowCheck.error || 'URL resolvida não autorizada.'
       );
     }
 
-    currentUrl = firstCheck.cleanUrl;
+    currentUrl = afterFollowCheck.cleanUrl;
 
-    if (!this.isShortShopeeHost(new URL(currentUrl).hostname)) {
+    /*
+     * Só consideramos que a resolução terminou quando a URL
+     * realmente contém IDs de produto.
+     *
+     * Isso corrige o caso:
+     *   s.shopee.com.br/XXXXX
+     *      -> shopee.com.br/opaanlp
+     *
+     * /opaanlp sozinho é apenas uma página intermediária.
+     */
+    const followedParsed = new URL(currentUrl);
+    const followedIds = this.extractShopeeIds(followedParsed);
+
+    if (
+      followedIds.shopId &&
+      followedIds.itemId &&
+      !this.isShortShopeeHost(followedParsed.hostname)
+    ) {
       return currentUrl;
     }
 
-    for (let hop = 0; hop < 6; hop++) {
-      const safety =
-        validateSafeShopeeUrl(currentUrl);
+    /*
+     * Se o resolvedor caiu em /opaanlp sem IDs, voltamos para
+     * o shortlink ORIGINAL para procurar a rota real no HTML.
+     */
+    if (
+      !this.isShortShopeeHost(followedParsed.hostname) &&
+      !followedIds.itemId
+    ) {
+      const pathname =
+        followedParsed.pathname
+          .replace(/\/+$/, '')
+          .toLowerCase();
 
       if (
-        !safety.isSafe ||
-        !safety.cleanUrl
+        pathname === '/opaanlp' ||
+        pathname === '' ||
+        pathname === '/'
       ) {
+        currentUrl = originalSafeUrl;
+      } else {
+        return currentUrl;
+      }
+    }
+
+    /*
+     * GET manual no shortlink. Algumas respostas da Shopee são 200
+     * e carregam a URL real dentro do HTML/JavaScript.
+     */
+    for (let hop = 0; hop < 8; hop++) {
+      const safety = validateSafeShopeeUrl(currentUrl);
+
+      if (!safety.isSafe || !safety.cleanUrl) {
         throw new Error(
-          safety.error ||
-            'Redirecionamento não autorizado.'
+          safety.error || 'Redirecionamento não autorizado.'
         );
       }
 
@@ -265,7 +314,7 @@ export class ShopeeProductProvider implements ProductProvider {
       const controller = new AbortController();
       const timeoutId = setTimeout(
         () => controller.abort(),
-        10000
+        12000
       );
 
       try {
@@ -288,8 +337,7 @@ export class ShopeeProductProvider implements ProductProvider {
           response.status >= 300 &&
           response.status < 400
         ) {
-          const location =
-            response.headers.get('location');
+          const location = response.headers.get('location');
 
           if (!location) {
             break;
@@ -300,13 +348,9 @@ export class ShopeeProductProvider implements ProductProvider {
             currentUrl
           ).toString();
 
-          const nextCheck =
-            validateSafeShopeeUrl(nextUrl);
+          const nextCheck = validateSafeShopeeUrl(nextUrl);
 
-          if (
-            !nextCheck.isSafe ||
-            !nextCheck.cleanUrl
-          ) {
+          if (!nextCheck.isSafe || !nextCheck.cleanUrl) {
             throw new Error(
               nextCheck.error ||
                 'Redirecionamento para domínio não autorizado.'
@@ -315,10 +359,13 @@ export class ShopeeProductProvider implements ProductProvider {
 
           currentUrl = nextCheck.cleanUrl;
 
+          const nextParsed = new URL(currentUrl);
+          const nextIds = this.extractShopeeIds(nextParsed);
+
           if (
-            !this.isShortShopeeHost(
-              new URL(currentUrl).hostname
-            )
+            nextIds.shopId &&
+            nextIds.itemId &&
+            !this.isShortShopeeHost(nextParsed.hostname)
           ) {
             return currentUrl;
           }
@@ -328,6 +375,11 @@ export class ShopeeProductProvider implements ProductProvider {
 
         if (response.ok) {
           const html = await response.text();
+
+          console.log(
+            'SHORTLINK HTML SIZE:',
+            html.length
+          );
 
           const extracted =
             this.extractProductUrlFromShortPage(
@@ -343,14 +395,23 @@ export class ShopeeProductProvider implements ProductProvider {
               extractedCheck.isSafe &&
               extractedCheck.cleanUrl
             ) {
-              currentUrl =
-                extractedCheck.cleanUrl;
+              currentUrl = extractedCheck.cleanUrl;
+
+              const extractedParsed =
+                new URL(currentUrl);
+
+              const extractedIds =
+                this.extractShopeeIds(extractedParsed);
 
               if (
-                !this.isShortShopeeHost(
-                  new URL(currentUrl).hostname
-                )
+                extractedIds.shopId &&
+                extractedIds.itemId
               ) {
+                console.log(
+                  'SHORTLINK REAL PRODUCT URL:',
+                  currentUrl
+                );
+
                 return currentUrl;
               }
 
@@ -370,6 +431,25 @@ export class ShopeeProductProvider implements ProductProvider {
 
         break;
       }
+    }
+
+    /*
+     * Não devolvemos /opaanlp sem IDs como se fosse produto.
+     * Isso evita mostrar R$ 0,00 ou título genérico.
+     */
+    const finalParsed = new URL(currentUrl);
+    const finalIds = this.extractShopeeIds(finalParsed);
+
+    if (
+      !finalIds.itemId &&
+      (
+        finalParsed.pathname.replace(/\/+$/, '').toLowerCase() === '/opaanlp' ||
+        this.isShortShopeeHost(finalParsed.hostname)
+      )
+    ) {
+      throw new Error(
+        'Não consegui resolver este link curto da Shopee até a página real do produto. Gere novamente o link em Compartilhar > Copiar link na página do produto e tente de novo.'
+      );
     }
 
     return currentUrl;
@@ -394,50 +474,60 @@ export class ShopeeProductProvider implements ProductProvider {
   ): string | undefined {
     const candidates: string[] = [];
 
-    const canonical =
-      html.match(
-        /<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i
-      ) ||
-      html.match(
-        /<link[^>]+href=["']([^"']+)["'][^>]+rel=["']canonical["']/i
-      );
+    const pushCandidate = (value?: string) => {
+      if (!value) return;
 
-    if (canonical?.[1]) {
-      candidates.push(canonical[1]);
-    }
+      const cleaned = value
+        .replace(/\\u002F/gi, '/')
+        .replace(/\\u003D/gi, '=')
+        .replace(/\\u0026/gi, '&')
+        .replace(/\\x2F/gi, '/')
+        .replace(/\\\//g, '/')
+        .replace(/&amp;/g, '&')
+        .replace(/%2F/gi, '/')
+        .replace(/%3A/gi, ':')
+        .trim();
 
-    const ogUrl =
-      html.match(
-        /<meta[^>]+property=["']og:url["'][^>]+content=["']([^"']+)["']/i
-      ) ||
-      html.match(
-        /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:url["']/i
-      );
+      if (cleaned) {
+        candidates.push(cleaned);
+      }
+    };
 
-    if (ogUrl?.[1]) {
-      candidates.push(ogUrl[1]);
+    /*
+     * A Shopee costuma colocar a rota real como caminho relativo:
+     * /opaanlp/SHOP_ID/ITEM_ID
+     *
+     * Esse bloco vem ANTES de canonical/og:url para evitar pegar
+     * o /opaanlp genérico.
+     */
+    const productRoutePatterns = [
+      /(?:https?:\\?\/\\?\/(?:www\.)?shopee\.com\.br)?\\?\/opaanlp\\?\/\d+\\?\/\d+(?:[^"'<>\\\s]*)?/gi,
+      /(?:https?:\/\/(?:www\.)?shopee\.com\.br)?\/opaanlp\/\d+\/\d+(?:[^"'<>\\\s]*)?/gi,
+      /(?:https?:\\?\/\\?\/(?:www\.)?shopee\.com\.br)?\\?\/product\\?\/\d+\\?\/\d+(?:[^"'<>\\\s]*)?/gi,
+      /(?:https?:\/\/(?:www\.)?shopee\.com\.br)?\/product\/\d+\/\d+(?:[^"'<>\\\s]*)?/gi,
+      /(?:https?:\\?\/\\?\/(?:www\.)?shopee\.com\.br)?\\?\/[^"'<>\\\s]*-i\.\d+\.\d+(?:[^"'<>\\\s]*)?/gi,
+    ];
+
+    for (const pattern of productRoutePatterns) {
+      let match: RegExpExecArray | null;
+
+      while ((match = pattern.exec(html)) !== null) {
+        pushCandidate(match[0]);
+      }
     }
 
     const jsPatterns = [
-      /(?:window\.)?location(?:\.href)?\s*=\s*["']([^"']+)["']/i,
-      /location\.replace\(\s*["']([^"']+)["']\s*\)/i,
-      /location\.assign\(\s*["']([^"']+)["']\s*\)/i,
-      /"redirectUrl"\s*:\s*"([^"]+)"/i,
-      /"redirect_url"\s*:\s*"([^"]+)"/i,
-      /"targetUrl"\s*:\s*"([^"]+)"/i,
-      /"target_url"\s*:\s*"([^"]+)"/i,
+      /(?:window\.)?location(?:\.href)?\s*=\s*["']([^"']+)["']/gi,
+      /location\.replace\(\s*["']([^"']+)["']\s*\)/gi,
+      /location\.assign\(\s*["']([^"']+)["']\s*\)/gi,
+      /["'](?:redirectUrl|redirect_url|targetUrl|target_url|destinationUrl|destination_url|landingUrl|landing_url|deeplink|deep_link)["']\s*:\s*["']([^"']+)["']/gi,
     ];
 
     for (const pattern of jsPatterns) {
-      const match = html.match(pattern);
+      let match: RegExpExecArray | null;
 
-      if (match?.[1]) {
-        candidates.push(
-          match[1]
-            .replace(/\\u002F/gi, '/')
-            .replace(/\\\//g, '/')
-            .replace(/&amp;/g, '&')
-        );
+      while ((match = pattern.exec(html)) !== null) {
+        pushCandidate(match[1]);
       }
     }
 
@@ -447,13 +537,31 @@ export class ShopeeProductProvider implements ProductProvider {
       ) || [];
 
     for (const url of directUrls) {
-      candidates.push(
-        url
-          .replace(/\\u002F/gi, '/')
-          .replace(/\\\//g, '/')
-          .replace(/&amp;/g, '&')
-      );
+      pushCandidate(url);
     }
+
+    /*
+     * canonical e og:url por último.
+     */
+    const canonical =
+      html.match(
+        /<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i
+      ) ||
+      html.match(
+        /<link[^>]+href=["']([^"']+)["'][^>]+rel=["']canonical["']/i
+      );
+
+    pushCandidate(canonical?.[1]);
+
+    const ogUrl =
+      html.match(
+        /<meta[^>]+property=["']og:url["'][^>]+content=["']([^"']+)["']/i
+      ) ||
+      html.match(
+        /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:url["']/i
+      );
+
+    pushCandidate(ogUrl?.[1]);
 
     for (const candidate of candidates) {
       try {
@@ -462,15 +570,27 @@ export class ShopeeProductProvider implements ProductProvider {
           baseUrl
         ).toString();
 
-        const parsed = new URL(absolute);
+        const check =
+          validateSafeShopeeUrl(absolute);
 
         if (
-          this.extractShopeeIds(parsed).itemId ||
-          /-i\.\d+\.\d+/i.test(
-            parsed.pathname
-          )
+          !check.isSafe ||
+          !check.cleanUrl
         ) {
-          return absolute;
+          continue;
+        }
+
+        const parsed =
+          new URL(check.cleanUrl);
+
+        const ids =
+          this.extractShopeeIds(parsed);
+
+        if (
+          ids.shopId &&
+          ids.itemId
+        ) {
+          return check.cleanUrl;
         }
       } catch {
         // ignore invalid candidate
