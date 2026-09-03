@@ -164,11 +164,46 @@ function extractRedirectFromHtml(
 ): string | undefined {
   const candidates: string[] = [];
 
+  const pushCandidate = (value?: string) => {
+    if (!value) return;
+
+    const cleaned = cleanExtractedUrl(value)
+      .replace(/\\u003D/gi, '=')
+      .replace(/\\u0026/gi, '&')
+      .replace(/\\x2F/gi, '/')
+      .replace(/%2F/gi, '/')
+      .replace(/%3A/gi, ':');
+
+    if (cleaned) {
+      candidates.push(cleaned);
+    }
+  };
+
   /*
-   * META refresh:
+   * 1) Prioridade máxima: rotas reais de produto que a Shopee
+   *    coloca no HTML do shortlink. Em muitos casos o destino
+   *    aparece como rota RELATIVA:
    *
-   * <meta http-equiv="refresh"
-   * content="0;url=https://shopee.com.br/...">
+   *    /opaanlp/SHOP_ID/ITEM_ID
+   */
+  const relativeProductPatterns = [
+    /(?:https?:\\?\/\\?\/(?:www\.)?shopee\.com\.br)?\\?\/opaanlp\\?\/(\d+)\\?\/(\d+)(?:[^"'<>\\\s]*)?/gi,
+    /(?:https?:\/\/(?:www\.)?shopee\.com\.br)?\/opaanlp\/(\d+)\/(\d+)(?:[^"'<>\\\s]*)?/gi,
+    /(?:https?:\\?\/\\?\/(?:www\.)?shopee\.com\.br)?\\?\/product\\?\/(\d+)\\?\/(\d+)(?:[^"'<>\\\s]*)?/gi,
+    /(?:https?:\/\/(?:www\.)?shopee\.com\.br)?\/product\/(\d+)\/(\d+)(?:[^"'<>\\\s]*)?/gi,
+    /(?:https?:\\?\/\\?\/(?:www\.)?shopee\.com\.br)?\\?\/[^"'<>\\\s]*-i\.(\d+)\.(\d+)(?:[^"'<>\\\s]*)?/gi,
+  ];
+
+  for (const pattern of relativeProductPatterns) {
+    let match: RegExpExecArray | null;
+
+    while ((match = pattern.exec(html)) !== null) {
+      pushCandidate(match[0]);
+    }
+  }
+
+  /*
+   * 2) META refresh.
    */
   const metaRefreshPatterns = [
     /<meta[^>]+http-equiv=["']?refresh["']?[^>]+content=["'][^"']*url\s*=\s*([^"'>\s]+)[^"']*["']/i,
@@ -177,37 +212,42 @@ function extractRedirectFromHtml(
 
   for (const pattern of metaRefreshPatterns) {
     const match = html.match(pattern);
+    pushCandidate(match?.[1]);
+  }
 
-    if (match?.[1]) {
-      candidates.push(match[1]);
+  /*
+   * 3) Campos JSON/JS usados pela página curta.
+   */
+  const jsonUrlPatterns = [
+    /["'](?:url|redirect_url|redirectUrl|target_url|targetUrl|destination_url|destinationUrl|landing_url|landingUrl|deeplink|deep_link)["']\s*:\s*["']([^"']+)["']/gi,
+    /(?:window\.)?location(?:\.href)?\s*=\s*["']([^"']+)["']/gi,
+    /(?:window\.)?location\.replace\(\s*["']([^"']+)["']\s*\)/gi,
+    /(?:window\.)?location\.assign\(\s*["']([^"']+)["']\s*\)/gi,
+  ];
+
+  for (const pattern of jsonUrlPatterns) {
+    let match: RegExpExecArray | null;
+
+    while ((match = pattern.exec(html)) !== null) {
+      pushCandidate(match[1]);
     }
   }
 
   /*
-   * canonical
+   * 4) canonical / og:url ficam por último porque páginas de
+   *    shortlink da Shopee podem apontar genericamente para
+   *    /opaanlp, que NÃO é o produto.
    */
-  const canonicalMatch = html.match(
-    /<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i
-  );
+  const canonicalPatterns = [
+    /<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i,
+    /<link[^>]+href=["']([^"']+)["'][^>]+rel=["']canonical["']/i,
+  ];
 
-  if (canonicalMatch?.[1]) {
-    candidates.push(canonicalMatch[1]);
+  for (const pattern of canonicalPatterns) {
+    const match = html.match(pattern);
+    pushCandidate(match?.[1]);
   }
 
-  /*
-   * canonical com atributos em ordem diferente
-   */
-  const canonicalMatch2 = html.match(
-    /<link[^>]+href=["']([^"']+)["'][^>]+rel=["']canonical["']/i
-  );
-
-  if (canonicalMatch2?.[1]) {
-    candidates.push(canonicalMatch2[1]);
-  }
-
-  /*
-   * og:url
-   */
   const ogUrlPatterns = [
     /<meta[^>]+property=["']og:url["'][^>]+content=["']([^"']+)["']/i,
     /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:url["']/i,
@@ -215,84 +255,31 @@ function extractRedirectFromHtml(
 
   for (const pattern of ogUrlPatterns) {
     const match = html.match(pattern);
-
-    if (match?.[1]) {
-      candidates.push(match[1]);
-    }
+    pushCandidate(match?.[1]);
   }
 
   /*
-   * JavaScript:
-   *
-   * window.location = "..."
-   * window.location.href = "..."
-   * location.href = "..."
-   */
-  const jsLocationPatterns = [
-    /window\.location\.href\s*=\s*["']([^"']+)["']/i,
-    /window\.location\s*=\s*["']([^"']+)["']/i,
-    /location\.href\s*=\s*["']([^"']+)["']/i,
-    /location\s*=\s*["']([^"']+)["']/i,
-    /window\.location\.replace\(\s*["']([^"']+)["']\s*\)/i,
-    /window\.location\.assign\(\s*["']([^"']+)["']\s*\)/i,
-    /location\.replace\(\s*["']([^"']+)["']\s*\)/i,
-    /location\.assign\(\s*["']([^"']+)["']\s*\)/i,
-  ];
-
-  for (const pattern of jsLocationPatterns) {
-    const match = html.match(pattern);
-
-    if (match?.[1]) {
-      candidates.push(match[1]);
-    }
-  }
-
-  /*
-   * URLs absolutas da Shopee que possam estar
-   * embutidas em JSON ou JavaScript.
+   * 5) URLs absolutas da Shopee embutidas no HTML.
    */
   const absoluteShopeeUrls =
     html.match(
       /https?:\\?\/\\?\/(?:www\.)?shopee\.com\.br\\?\/[^"'<>\\\s]+/gi
     ) || [];
 
-  candidates.push(...absoluteShopeeUrls);
-
-  /*
-   * Algumas páginas incluem a URL como JSON:
-   *
-   * "url":"https:\/\/shopee.com.br\/..."
-   */
-  const jsonUrlPatterns = [
-    /["']url["']\s*:\s*["'](https?:\\\/\\\/[^"']+)["']/gi,
-    /["']redirect_url["']\s*:\s*["']([^"']+)["']/gi,
-    /["']redirectUrl["']\s*:\s*["']([^"']+)["']/gi,
-    /["']target_url["']\s*:\s*["']([^"']+)["']/gi,
-    /["']targetUrl["']\s*:\s*["']([^"']+)["']/gi,
-  ];
-
-  for (const pattern of jsonUrlPatterns) {
-    let match: RegExpExecArray | null;
-
-    while ((match = pattern.exec(html)) !== null) {
-      if (match[1]) {
-        candidates.push(match[1]);
-      }
-    }
+  for (const url of absoluteShopeeUrls) {
+    pushCandidate(url);
   }
 
   /*
-   * Analisa todos os candidatos encontrados.
+   * Primeiro passe: SOMENTE destino que realmente contém IDs
+   * de produto. Isso impede o bug que transformava o shortlink em
+   * https://shopee.com.br/opaanlp e perdia shopId/itemId.
    */
   for (const rawCandidate of candidates) {
     try {
       const cleaned = cleanExtractedUrl(rawCandidate);
-
       const absolute = new URL(cleaned, currentUrl).toString();
 
-      /*
-       * Não aceita retornar para a própria URL.
-       */
       if (absolute === currentUrl) {
         continue;
       }
@@ -303,20 +290,25 @@ function extractRedirectFromHtml(
         continue;
       }
 
-      /*
-       * Priorizamos página real de produto Shopee.
-       */
       const parsed = new URL(safety.cleanUrl);
+      const pathname = decodeURIComponent(parsed.pathname);
 
-      const pathname = parsed.pathname;
-
-      const looksLikeProduct =
+      const looksLikeRealProduct =
         /\/product\/\d+\/\d+/i.test(pathname) ||
         /-i\.\d+\.\d+/i.test(pathname) ||
         /\/opaanlp\/\d+\/\d+/i.test(pathname) ||
-        /\/.+-i\.\d+\.\d+/i.test(pathname);
+        /\/\d+\/\d+(?:\/)?$/i.test(pathname) ||
+        (
+          /^\d+$/.test(parsed.searchParams.get('shopid') || '') &&
+          /^\d+$/.test(parsed.searchParams.get('itemid') || '')
+        );
 
-      if (looksLikeProduct) {
+      if (looksLikeRealProduct) {
+        console.log(
+          '[followSafeRedirects] Produto encontrado no HTML:',
+          safety.cleanUrl
+        );
+
         return safety.cleanUrl;
       }
     } catch {
@@ -325,13 +317,12 @@ function extractRedirectFromHtml(
   }
 
   /*
-   * Segunda tentativa:
-   * aceita qualquer URL Shopee segura diferente da atual.
+   * Segundo passe: só aceita um redirecionamento "genérico"
+   * se ele NÃO for a página falsa /opaanlp sem IDs.
    */
   for (const rawCandidate of candidates) {
     try {
       const cleaned = cleanExtractedUrl(rawCandidate);
-
       const absolute = new URL(cleaned, currentUrl).toString();
 
       if (absolute === currentUrl) {
@@ -340,9 +331,25 @@ function extractRedirectFromHtml(
 
       const safety = validateSafeShopeeUrl(absolute);
 
-      if (safety.isSafe && safety.cleanUrl) {
-        return safety.cleanUrl;
+      if (!safety.isSafe || !safety.cleanUrl) {
+        continue;
       }
+
+      const parsed = new URL(safety.cleanUrl);
+      const pathname = parsed.pathname.replace(/\/+$/, '').toLowerCase();
+
+      const isGenericDeadEnd =
+        pathname === '' ||
+        pathname === '/' ||
+        pathname === '/opaanlp' ||
+        pathname === '/product' ||
+        pathname === '/shop';
+
+      if (isGenericDeadEnd) {
+        continue;
+      }
+
+      return safety.cleanUrl;
     } catch {
       // ignora
     }
