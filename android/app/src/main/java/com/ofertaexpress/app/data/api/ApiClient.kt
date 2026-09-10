@@ -22,9 +22,14 @@ object ApiClient {
         }
         OkHttpClient.Builder()
             .addInterceptor(logging)
-            .connectTimeout(20, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
-            .writeTimeout(20, TimeUnit.SECONDS)
+
+            // Timeout = 0 no OkHttp significa SEM LIMITE.
+            // O app aguardará o servidor/Bridge pelo tempo que for necessário.
+            .connectTimeout(0, TimeUnit.SECONDS)
+            .readTimeout(0, TimeUnit.SECONDS)
+            .writeTimeout(0, TimeUnit.SECONDS)
+            .callTimeout(0, TimeUnit.SECONDS)
+
             .build()
     }
 fun getOkHttpClient(): OkHttpClient = httpClient
