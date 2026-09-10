@@ -163,14 +163,12 @@ export class ShopeeProductProvider implements ProductProvider {
       endpoint
     );
 
-    const controller =
-      new AbortController();
 
-    const timeoutId =
-      setTimeout(
-        () => controller.abort(),
-        60000
-      );
+    /*
+     * Sem timeout imposto pelo Oferta Express.
+     * Esta requisição aguardará o Bridge terminar, pelo tempo que for necessário.
+     */
+
 
     try {
 
@@ -191,9 +189,6 @@ export class ShopeeProductProvider implements ProductProvider {
             body: JSON.stringify({
               url: productUrl,
             }),
-
-            signal:
-              controller.signal,
           }
         );
 
@@ -368,28 +363,12 @@ export class ShopeeProductProvider implements ProductProvider {
 
     } catch (error) {
 
-      if (
-        error instanceof Error &&
-        error.name === 'AbortError'
-      ) {
-
-        console.warn(
-          'PC BRIDGE TIMEOUT após 60 segundos.'
-        );
-
-      } else {
-
-        console.warn(
-          'PC BRIDGE FETCH ERROR:',
-          error
-        );
-      }
+      console.warn(
+        'PC BRIDGE FETCH ERROR:',
+        error
+      );
 
       return undefined;
-
-    } finally {
-
-      clearTimeout(timeoutId);
     }
   }
 
